@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Riemann vs Lebesgue and the normal CDF</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1f;--mut:#62626e;--card:#f3f3f7;--acc:#4f46e5;--bd:#d6d6de;--hi:#e11d48;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15151b;--fg:#ececf2;--mut:#a0a0b0;--card:#202029;--acc:#8b85ff;--bd:#383846;--hi:#fb7185;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#15151b;--fg:#ececf2;--mut:#a0a0b0;--card:#202029;--acc:#8b85ff;--bd:#383846;--hi:#fb7185;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;padding:14px;max-width:860px;margin-inline:auto}
+h1{font-size:20px;margin:4px 0 10px}h2{font-size:17px;margin:22px 0 6px}
+.btn{background:var(--acc);color:#fff;border:1px solid var(--acc);border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;margin:8px 0}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:8px 0}
+input,select{background:var(--bg);color:var(--fg);border:1px solid var(--bd);border-radius:6px;padding:6px;font:inherit;max-width:100%}
+input[type=number]{width:90px}
+canvas{width:100%;height:210px;display:block;background:var(--card);border:1px solid var(--bd);border-radius:8px;margin:6px 0}
+.mut{color:var(--mut)}.scroll{overflow-x:auto}
+table{border-collapse:collapse;font-size:12.5px;min-width:100%}td,th{border:1px solid var(--bd);padding:4px 7px;text-align:left;white-space:nowrap}
+</style></head><body>
+<h1>Riemann vs Lebesgue integration, and the normal CDF</h1>
+
+<h2>Es 1 – Riemann and Lebesgue sums</h2>
+<div class="card"><b>Riemann</b> (midpoint): split the <i>domain</i> into n subintervals, sum f(midpoint)·width. <b>Lebesgue-style</b>: split the <i>range</i> into k levels, estimate the measure of each preimage {x : f(x) in level} with N = 200 000 domain points, sum level·measure.</div>
+<div class="row"><button class="btn" id="r1">Run Es 1</button><span class="mut" id="t1"></span></div>
+<div class="scroll" id="tb1"></div>
+<div class="row"><label>Convergence plot for <select id="fs"></select></label></div>
+<canvas id="cv"></canvas>
+<p class="mut">Log–log plot of |error| against n (Riemann, blue) or k (Lebesgue, red; N = 200 000 fixed). Errors below 1e-16 are drawn at 1e-16.</p>
+<h2>Pathological functions</h2>
+<div class="card" id="path"></div>
+
+<h2>Es 2 – Normal CDF Φ(x)</h2>
+<div class="card">Methods: trapezoid and Simpson on Φ(x) = ½ + ∫₀ˣ φ; erf relation Φ(x) = ½[1 + erf(x/√2)] with the Abramowitz–Stegun 7.1.26 approximation; power series Φ(x) = ½ + φ(x)(x + x³/3 + x⁵/(3·5) + …); series + continued fraction for the tails. Reference: Python <code>math.erfc</code> (double precision), matching R <code>pnorm</code> (e.g. Φ(1.96) = 0.9750021).</div>
+<div class="row"><button class="btn" id="r2">Run Es 2</button><label>Your x <input id="xv" type="number" step="0.1" value="1.96"></label><span class="mut" id="xo"></span></div>
+<div class="scroll" id="tb2"></div>
+<div class="scroll" id="tb3"></div>
+<p class="mut">Absolute errors against the reference. Times: 100 000 evaluations on x ∈ [−4, 4], in your browser.</p>
+<script>
+/* ===== Es 1: Riemann vs Lebesgue ===== */
+const FUNS=[
+ {n:'sin x on [0,π]',f:Math.sin,a:0,b:Math.PI,ex:2},
+ {n:'x² on [0,1]',f:x=>x*x,a:0,b:1,ex:1/3},
+ {n:'step: 1 if x<0.5, else 3',f:x=>x<.5?1:3,a:0,b:1,ex:2},
+ {n:'|x − 0.5|',f:x=>Math.abs(x-.5),a:0,b:1,ex:.25},
+ {n:'1/√x on (0,1]',f:x=>1/Math.sqrt(x),a:0,b:1,ex:2},
+ {n:'indicator: 1 if x<0.5, else 0',f:x=>x<.5?1:0,a:0,b:1,ex:.5},
+ {n:'sin x / x on [0,π]',f:x=>x?Math.sin(x)/x:1,a:0,b:Math.PI,ex:1.851937051982466}];
+const riemann=(F,n)=>{const h=(F.b-F.a)/n;let s=0;for(let i=0;i<n;i++)s+=F.f(F.a+(i+.5)*h);return s*h};
+const sampleVals=(F,N)=>{const v=new Float64Array(N),h=(F.b-F.a)/N;for(let i=0;i<N;i++)v[i]=F.f(F.a+(i+.5)*h);return v};
+/* Lebesgue-style: split the RANGE into k levels, measure each preimage (estimated on N domain points), sum level*measure */
+function lebesgue(F,v,k){let lo=Infinity,hi=-Infinity;for(const x of v){if(x<lo)lo=x;if(x>hi)hi=x}
+ const h=(hi-lo)/k||1,cnt=new Float64Array(k);for(const x of v)cnt[Math.min(k-1,Math.floor((x-lo)/h))]++;
+ let s=0;for(let j=0;j<k;j++)s+=(lo+(j+.5)*h)*cnt[j];return s*(F.b-F.a)/v.length}
+const tm=f=>{const t=performance.now(),r=f();return[r,performance.now()-t]};
+const gcd=(a,b)=>b?gcd(b,a%b):a;
+const thomaeSum=n=>{let s=0;for(let i=1;i<=n;i++)s+=gcd(i,n)/n;return s/n}; /* tags i/n: f(i/n)=1/q, q=n/gcd */
+/* ===== Es 2: normal CDF ===== */
+const phi=x=>Math.exp(-x*x/2)/Math.sqrt(2*Math.PI);
+const trap=(x,n)=>{const h=x/n;let s=(phi(0)+phi(x))/2;for(let i=1;i<n;i++)s+=phi(i*h);return .5+s*h};
+const simpson=(x,n)=>{const h=x/n;let s=phi(0)+phi(x);for(let i=1;i<n;i++)s+=phi(i*h)*(i%2?4:2);return .5+s*h/3};
+const series=x=>{let t=x,s=x,k=0;while(Math.abs(t)>1e-17*Math.abs(s)&&k<2000){k++;t*=x*x/(2*k+1);s+=t}return .5+phi(x)*s};
+const tailCF=x=>{let f=x;for(let k=80;k>=1;k--)f=x+k/f;return phi(x)/f}; /* Q(x)=1-Φ(x), x>0 */
+const erfAS=z=>{const t=1/(1+0.3275911*Math.abs(z)),y=1-((((1.061405429*t-1.453152027)*t+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-z*z);return z>=0?y:-y};
+const cdfErf=x=>.5*(1+erfAS(x/Math.SQRT2));
+const hybrid=x=>Math.abs(x)<3?series(x):(x>0?1-tailCF(x):tailCF(-x));
+const REF=[[0, 0.5], [0.5, 0.6914624612740131], [1, 0.8413447460685429], [1.5, 0.9331927987311419], [1.96, 0.9750021048517795], [2, 0.9772498680518208], [2.5, 0.9937903346742238], [3, 0.9986501019683699], [4, 0.9999683287581669], [5, 0.9999997133484281], [-1, 0.15865525393145707], [-3, 0.0013498980316300957], [-5, 2.866515718791946e-07]];
+const METH={'Trapezoid n=100':x=>x>=0?trap(x,100):1-trap(-x,100),'Simpson n=100':x=>x>=0?simpson(x,100):1-simpson(-x,100),'erf approx. (A&S 7.1.26)':cdfErf,'Power series':series,'Series + continued fraction':hybrid};
+
+const $=id=>document.getElementById(id),css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const ex=x=>x===0?'0':x.toExponential(1);
+let LV=null;
+function plot(){const F=FUNS[+$('fs').value],v=LV[+$('fs').value],ns=[];for(let n=10;n<=1e5;n*=Math.sqrt(10))ns.push(Math.round(n));
+ const E=f=>Math.max(1e-16,f),R=ns.map(n=>E(Math.abs(riemann(F,n)-F.ex))),L=ns.map(n=>E(Math.abs(lebesgue(F,v,n)-F.ex)));
+ const cv=$('cv'),r=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*r;cv.height=h*r;const c=cv.getContext('2d');c.scale(r,r);c.font='11px system-ui';
+ const lo=-16.5,hi=Math.ceil(Math.max(...R,...L,1e-3)>1?1:0),X=i=>40+i/(ns.length-1)*(w-50),Y=y=>10+(hi-Math.log10(y))/(hi-lo)*(h-30);
+ c.strokeStyle=css('--bd');c.fillStyle=css('--mut');for(let e=0;e>=-16;e-=4){c.beginPath();c.moveTo(40,Y(10**e));c.lineTo(w-6,Y(10**e));c.stroke();c.fillText('1e'+e,4,Y(10**e)+3)}
+ ns.forEach((n,i)=>{if(i%2===0)c.fillText(n>=1000?(n/1000)+'k':n,X(i)-8,h-4)});
+ [[R,'#4f46e5'],[L,'#e11d48']].forEach(([s,col])=>{c.strokeStyle=col;c.lineWidth=2;c.beginPath();s.forEach((y,i)=>i?c.lineTo(X(i),Y(y)):c.moveTo(X(i),Y(y)));c.stroke()})}
+$('r1').onclick=()=>{const N=200000;let h='<table><tr><th>function</th><th>exact</th>'+[10,100,1000,10000].map(n=>`<th>n=k=${n}<br>Riemann | Lebesgue</th>`).join('')+'<th>time ms<br>R(n=1e5) | L(N=2e5)</th></tr>';LV=[];
+ FUNS.forEach((F,i)=>{const[v,tl]=tm(()=>sampleVals(F,N));LV.push(v);const[,tr]=tm(()=>riemann(F,1e5)),[,tl2]=tm(()=>lebesgue(F,v,1000));
+  h+=`<tr><td>${F.n}</td><td>${F.ex.toFixed(6)}</td>`+[10,100,1000,10000].map(n=>`<td>${ex(Math.abs(riemann(F,n)-F.ex))} | ${ex(Math.abs(lebesgue(F,v,n)-F.ex))}</td>`).join('')+`<td>${tr.toFixed(1)} | ${(tl+tl2).toFixed(1)}</td></tr>`});
+ $('tb1').innerHTML=h+'</table>';$('fs').innerHTML=FUNS.map((F,i)=>`<option value="${i}">${F.n}</option>`).join('');plot();
+ const T=[10,100,1000,1024,10007].map(n=>`n=${n}: ${thomaeSum(n).toFixed(5)}`).join('; ');
+ $('path').innerHTML=`<b>Dirichlet</b> (1 on rationals, 0 on irrationals): every subinterval contains both kinds of points, so Riemann sums depend on the tags: rational tags give 1, irrational tags give 0 (upper sum 1, lower sum 0), hence <b>not Riemann-integrable</b>. Lebesgue: the preimage of {1} is ℚ∩[0,1], measure 0, so the integral is 1·0 + 0·1 = <b>0</b>. (Floating-point numbers are all rational, so this cannot be simulated numerically; it is a symbolic argument.)<br><br><b>Thomae</b> (1/q at p/q, 0 at irrationals): Riemann-integrable with integral 0. Riemann sum with tags i/n (computed here): ${T}. It tends to 0, but slowly and irregularly: it depends on the divisors of n. Lebesgue: {f ≥ ε} is a finite set (measure 0) for every ε &gt; 0, so the integral is 0: same value.`;
+};
+$('fs').onchange=plot;
+function eval2(x){return Object.entries(METH).map(([k,f])=>[k,f(x)])}
+$('r2').onclick=()=>{let h='<table><tr><th>x</th><th>reference Φ(x)</th>'+Object.keys(METH).map(k=>`<th>${k}</th>`).join('')+'</tr>';
+ REF.forEach(([x,r])=>{h+=`<tr><td>${x}</td><td>${r.toPrecision(16)}</td>`+Object.values(METH).map(f=>`<td>${ex(Math.abs(f(x)-r))}</td>`).join('')+'</tr>'});$('tb2').innerHTML=h+'</table>';
+ let t='<table><tr><th>method</th><th>time (ms / 100 000 evaluations)</th></tr>';
+ for(const[k,f]of Object.entries(METH)){const[,ms]=tm(()=>{let s=0;for(let i=0;i<1e5;i++)s+=f(-4+8*i/1e5);return s});t+=`<tr><td>${k}</td><td>${ms.toFixed(1)}</td></tr>`}$('tb3').innerHTML=t+'</table>';
+ const x=+$('xv').value;$('xo').textContent=eval2(x).map(([k,v])=>`${k}: ${v.toPrecision(12)}`).join(' · ')};
+$('r1').click();$('r2').click();
+</script></body></html>
